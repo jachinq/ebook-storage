@@ -70,6 +70,28 @@ async fn remove_directory(app: tauri::AppHandle, path: String) -> Result<Vec<Str
     Ok(dirs)
 }
 
+// ========== 索引持久化 ==========
+
+fn save_index(app: &tauri::AppHandle, books: &[BookInfo]) -> Result<(), String> {
+    let store = app.store("index.json").map_err(|e| e.to_string())?;
+    store.set("books", serde_json::json!(books));
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_cached_books(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<BookInfo>, String> {
+    let store = app.store("index.json").map_err(|e| e.to_string())?;
+    let cached: Vec<BookInfo> = store
+        .get("books")
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
+    let mut books = state.books.lock().map_err(|e| e.to_string())?;
+    *books = cached.clone();
+
+    Ok(cached)
+}
+
 // ========== 书籍扫描 ==========
 
 fn scan_directory(dir: &str) -> Vec<BookInfo> {
@@ -135,6 +157,8 @@ async fn scan_books(app: tauri::AppHandle, state: State<'_, AppState>) -> Result
     let mut books = state.books.lock().map_err(|e| e.to_string())?;
     *books = all_books.clone();
 
+    save_index(&app, &all_books)?;
+
     Ok(all_books)
 }
 
@@ -172,6 +196,7 @@ async fn reveal_file(path: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn rename_file(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     path: String,
     new_name: String,
@@ -209,11 +234,12 @@ async fn rename_file(
         modified,
     };
 
-    // 更新内存缓存
+    // 更新内存缓存并同步索引
     if let Ok(mut books) = state.books.lock() {
         if let Some(b) = books.iter_mut().find(|b| b.path == path) {
             *b = book.clone();
         }
+        let _ = save_index(&app, &books);
     }
 
     Ok(book)
@@ -234,6 +260,7 @@ pub fn run() {
             get_directories,
             add_directory,
             remove_directory,
+            load_cached_books,
             scan_books,
             search_books,
             open_file,

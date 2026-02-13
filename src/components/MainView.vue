@@ -26,7 +26,13 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 async function loadBooks() {
   loading.value = true;
   try {
-    books.value = await invoke<BookInfo[]>("scan_books");
+    // 优先从缓存加载，缓存为空时 fallback 到全量扫描
+    const cached = await invoke<BookInfo[]>("load_cached_books");
+    if (cached.length > 0) {
+      books.value = cached;
+    } else {
+      books.value = await invoke<BookInfo[]>("scan_books");
+    }
   } finally {
     loading.value = false;
   }
